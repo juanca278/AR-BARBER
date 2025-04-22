@@ -6,10 +6,29 @@
   <title>AR-BARBER</title>
   <!-- Font Awesome para íconos -->
   <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@6.4.0/css/all.css">
+  
+  <!-- Firebase (versión compat para usar firebase.initializeApp de la manera tradicional) -->
+  <!-- For Firebase JS SDK v7.20.0 and later, measurementId is optional -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAuCecYVh9CiAlW6dWNrZuzuLq2DETtq1k",
+      authDomain: "ar-barber.firebaseapp.com",
+      projectId: "ar-barber",
+      storageBucket: "ar-barber.firebasestorage.app",
+      messagingSenderId: "663202339677",
+      appId: "1:663202339677:web:441b1abf0d0ff5034966b4",
+      measurementId: "G-3WBEMN22HX"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
+  
   <style>
     /* General */
-    * { 
-      box-sizing: border-box; 
+    * {  
+      box-sizing: border-box;  
     }
     body {
       font-family: Arial, sans-serif;
@@ -219,20 +238,20 @@
       border-radius: 3px;
       margin-bottom: 10px;
     }
-    .appointment p { 
-      margin: 5px 0; 
+    .appointment p {
+      margin: 5px 0;
     }
-    .estatus-proximo { 
-      color: yellow; 
-      font-weight: bold; 
+    .estatus-proximo {
+      color: yellow;
+      font-weight: bold;
     }
-    .estatus-pendiente { 
-      color: red; 
-      font-weight: bold; 
+    .estatus-pendiente {
+      color: red;
+      font-weight: bold;
     }
-    .estatus-finalizado { 
-      color: green; 
-      font-weight: bold; 
+    .estatus-finalizado {
+      color: green;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -405,63 +424,33 @@
     };
 
     // Variable global para citas y credenciales
-    const appointments = JSON.parse(localStorage.getItem("appointments")) || [];
     const adminCredentials = { user: "admin", pass: "admin123" };
 
+    let appointments = [];  // Se sincronizará en tiempo real con Firestore
     let clientData = {};  
     let selectedHour = null;
     let currentEditingIndex = null; // Índice de la cita en edición
 
-    // Funciones para guardar y cargar citas
-    function saveAppointments() {
-      localStorage.setItem("appointments", JSON.stringify(appointments));
-    }
-    function loadAppointments() {
-      const storedAppointments = localStorage.getItem("appointments");
-      if (storedAppointments) {
-        appointments.splice(0, appointments.length, ...JSON.parse(storedAppointments));
-      }
-    }
-    loadAppointments();
-
-    // Migración de citas antiguas a nuevos estatus
-    function migrateAppointments() {
-      appointments.forEach(app => {
-        if (app.estatus === "Próximo") { 
-          app.estatus = "Próximo corte";
-        } else if (app.estatus === "Pendiente") {
-          app.estatus = "Corte no realizado";
-        } else if (app.estatus === "Finalizado") {
-          app.estatus = "Corte Terminado";
-        }
+    // Sincronización en tiempo real de la colección "appointments" de Firestore
+    db.collection("appointments").onSnapshot((snapshot) => {
+      appointments = [];
+      snapshot.forEach(doc => {
+        let data = doc.data();
+        data.id = doc.id;
+        appointments.push(data);
       });
-      saveAppointments();
-    }
-    migrateAppointments();
-
-    // Purgar citas "Corte Terminado" de más de 3 días
-    function purgeOldFinalizedAppointments() {
-      const now = Date.now();
-      const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
-      for (let i = appointments.length - 1; i >= 0; i--) {
-        const app = appointments[i];
-        if (app.estatus === "Corte Terminado" && app.finalizedAt) {
-          const finalizedTime = new Date(app.finalizedAt).getTime();
-          if (now - finalizedTime >= threeDaysInMs) {
-            appointments.splice(i, 1);
-          }
-        }
+      // Refrescar el panel de administración si se encuentra visible
+      if (!document.getElementById("adminPanel").classList.contains("hidden")) {
+        renderAdminPanel();
       }
-      saveAppointments();
-    }
+    });
 
-    // Función para mostrar una sección
+    // Funciones para navegar entre secciones
     function showSection(sectionId) {
       document.querySelectorAll("section").forEach(section => section.classList.add("hidden"));
       document.getElementById(sectionId).classList.remove("hidden");
     }
 
-    // Navegación
     document.getElementById("btnHome").addEventListener("click", () => showSection("home"));
     document.getElementById("btnClient").addEventListener("click", () => {
       document.getElementById("clientForm").reset();
@@ -474,31 +463,7 @@
     document.getElementById("btnAdmin").addEventListener("click", () => showSection("adminLogin"));
     document.getElementById("btnAdminBack").addEventListener("click", () => showSection("home"));
 
-    // Manejo del formulario cliente
-    document.getElementById("clientForm").addEventListener("submit", function(e) {
-      e.preventDefault();
-      const name = document.getElementById("clientName").value;
-      const date = document.getElementById("clientDate").value;
-      const cutType = document.getElementById("cutType").value;
-      const selectedProducts = Array.from(document.querySelectorAll("#clientForm input[type=checkbox]:checked"))
-                                  .map(product => product.value);
-
-      if (!date) {
-        document.getElementById("clientMessage").textContent = "Debe seleccionar una fecha.";
-        return;
-      }
-      if (!cutType) {
-        document.getElementById("clientMessage").textContent = "Debe seleccionar el servicio.";
-        return;
-      }
-      clientData = { name, date, selectedProducts, cutType };
-      document.getElementById("selectedDate").textContent = date;
-      document.getElementById("hoursSection").classList.remove("hidden");
-      renderAvailableHours(date);
-      document.getElementById("btnAcceptAppointment").disabled = true;
-    });
-
-    // Mostrar horas disponibles en reserva
+    // Manejo del formulario cliente y renderización de horas disponibles
     function renderAvailableHours(date) {
       const hoursContainer = document.getElementById("hoursContainer");
       hoursContainer.innerHTML = "";
@@ -530,6 +495,39 @@
       });
     }
 
+    // Función para agregar una cita en Firestore
+    async function addAppointment(appointment) {
+      try {
+        await db.collection("appointments").add(appointment);
+      } catch (error) {
+        console.error("Error agregando la cita: ", error);
+      }
+    }
+
+    // Manejo del formulario del cliente
+    document.getElementById("clientForm").addEventListener("submit", function(e) {
+      e.preventDefault();
+      const name = document.getElementById("clientName").value;
+      const date = document.getElementById("clientDate").value;
+      const cutType = document.getElementById("cutType").value;
+      const selectedProducts = Array.from(document.querySelectorAll("#clientForm input[type=checkbox]:checked"))
+                                  .map(product => product.value);
+
+      if (!date) {
+        document.getElementById("clientMessage").textContent = "Debe seleccionar una fecha.";
+        return;
+      }
+      if (!cutType) {
+        document.getElementById("clientMessage").textContent = "Debe seleccionar el servicio.";
+        return;
+      }
+      clientData = { name, date, selectedProducts, cutType };
+      document.getElementById("selectedDate").textContent = date;
+      document.getElementById("hoursSection").classList.remove("hidden");
+      renderAvailableHours(date);
+      document.getElementById("btnAcceptAppointment").disabled = true;
+    });
+
     document.getElementById("btnAcceptAppointment").addEventListener("click", function() {
       if (!selectedHour) return;
       reserveHour(clientData.name, clientData.date, selectedHour, clientData.selectedProducts, clientData.cutType);
@@ -538,27 +536,28 @@
       selectedHour = null;
     });
 
-    // Al reservar se asigna "Próximo corte"
+    // Función para reservar una cita y guardarla en Firestore
     function reserveHour(name, date, hour, products, cutType) {
       let price = servicePrices[cutType] || 0;
       products.forEach(product => { price += productPrices[product] || 0; });
-      appointments.push({ 
-        name, 
-        date, 
-        time: hour, 
-        products, 
-        cutType, 
-        monto: price, 
-        estatus: "Próximo corte" 
-      });
-      saveAppointments();
+      const newAppointment = {
+        name,
+        date,
+        time: hour,
+        products,
+        cutType,
+        monto: price,
+        estatus: "Próximo corte",
+        createdAt: new Date().toISOString()
+      };
+      addAppointment(newAppointment);
       document.getElementById("clientMessage").textContent =
         `Cita reservada para el ${date} a las ${hour}. Servicio: ${cutType}. Productos: ${products.join(", ") || "Ninguno"}. Precio: $${price}.`;
       renderAvailableHours(date);
       setTimeout(() => { showSection("home"); }, 2000);
     }
 
-    // Login Administrador
+    // Módulo de Administrador: Login y renderizado del panel
     document.getElementById("loginForm").addEventListener("submit", function(e) {
       e.preventDefault();
       const user = document.getElementById("adminUser").value;
@@ -578,16 +577,15 @@
       showSection("home");
     });
 
-    // Crear elemento HTML para cada cita (para admin)
+    // Función auxiliar para crear el elemento HTML de cada cita (Administrador)
     function createAppointmentElement(app, index) {
       let estClass = "";
-      // Usamos los nuevos estatus
-      if (app.estatus === "Próximo corte") { 
-        estClass = "estatus-proximo"; 
-      } else if (app.estatus === "Corte no realizado") { 
-        estClass = "estatus-pendiente"; 
-      } else if (app.estatus === "Corte Terminado") { 
-        estClass = "estatus-finalizado"; 
+      if (app.estatus === "Próximo corte") {
+        estClass = "estatus-proximo";
+      } else if (app.estatus === "Corte no realizado") {
+        estClass = "estatus-pendiente";
+      } else if (app.estatus === "Corte Terminado") {
+        estClass = "estatus-finalizado";
       }
       const container = document.createElement("div");
       container.classList.add("appointment");
@@ -610,12 +608,21 @@
       return container;
     }
 
-    // Renderizar panel de admin agrupando por estatus
     function renderAdminPanel() {
-      purgeOldFinalizedAppointments();
+      // Purga simulada de citas terminadas de más de 3 días (opcional, idealmente usar Cloud Functions)
+      const now = new Date();
+      appointments.forEach(async (app, index) => {
+        if (app.estatus === "Corte Terminado" && app.finalizedAt) {
+          const finalizedTime = new Date(app.finalizedAt).getTime();
+          const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+          if (now - finalizedTime >= threeDaysInMs) {
+            await db.collection("appointments").doc(app.id).delete();
+          }
+        }
+      });
+
       const adminContainer = document.getElementById("adminContainer");
       adminContainer.innerHTML = "";
-      const now = new Date();
 
       const groupProximo = document.createElement("div");
       groupProximo.className = "status-group";
@@ -633,6 +640,7 @@
         const appDateTime = new Date(app.date + "T" + app.time);
         if (app.estatus === "Próximo corte" && appDateTime < now) {
           app.estatus = "Corte no realizado";
+          db.collection("appointments").doc(app.id).update({ estatus: "Corte no realizado" });
         }
         const appointmentElement = createAppointmentElement(app, index);
         if (app.estatus === "Próximo corte") {
@@ -643,7 +651,7 @@
           groupFinalizado.appendChild(appointmentElement);
         }
       });
-      
+
       if (groupProximo.children.length <= 1) {
         const msg = document.createElement("p");
         msg.textContent = "No hay citas próximas.";
@@ -659,21 +667,26 @@
         msg.textContent = "No hay citas terminadas.";
         groupFinalizado.appendChild(msg);
       }
-      
+
       adminContainer.appendChild(groupProximo);
       adminContainer.appendChild(groupPendiente);
       adminContainer.appendChild(groupFinalizado);
 
       document.querySelectorAll(".btnTerminado").forEach(button => {
-        button.addEventListener("click", function() {
+        button.addEventListener("click", async function() {
           const idx = this.getAttribute("data-index");
-          appointments[idx].estatus = "Corte Terminado";
-          appointments[idx].finalizedAt = new Date().toISOString();
-          saveAppointments();
+          let app = appointments[idx];
+          app.estatus = "Corte Terminado";
+          app.finalizedAt = new Date().toISOString();
+          await db.collection("appointments").doc(app.id).update({
+            estatus: "Corte Terminado",
+            finalizedAt: app.finalizedAt
+          });
           alert("Cita marcada como Corte Terminado. Se borrará automáticamente en 3 días.");
           renderAdminPanel();
         });
       });
+
       document.querySelectorAll(".btnModificar").forEach(button => {
         button.addEventListener("click", function() {
           const idx = this.getAttribute("data-index");
@@ -685,6 +698,7 @@
       });
     }
 
+    // Funciones para el Modal de Edición
     function updateEditTimeOptions(selectedDate, currentTimeSelection) {
       const editTimeSelect = document.getElementById("editTime");
       editTimeSelect.innerHTML = "";
@@ -717,7 +731,7 @@
       updateEditTimeOptions(app.date, app.time);
       document.getElementById("editTime").value = app.time;
       document.getElementById("editCutType").value = app.cutType;
-      
+
       const productCheckboxIds = ["editProduct1", "editProduct2", "editProduct3", "editProduct4", "editProduct5"];
       productCheckboxIds.forEach(id => {
         document.getElementById(id).checked = false;
@@ -743,7 +757,7 @@
       updateEditTimeOptions(this.value, null);
     });
 
-    document.getElementById("saveChanges").addEventListener("click", function() {
+    document.getElementById("saveChanges").addEventListener("click", async function() {
       const newDate = document.getElementById("editDate").value;
       const newTime = document.getElementById("editTime").value;
       const newCutType = document.getElementById("editCutType").value;
@@ -762,28 +776,36 @@
       newProducts.forEach(product => {
         newPrice += productPrices[product] || 0;
       });
-      
+
       const idx = currentEditingIndex;
       if (idx !== null) {
-        appointments[idx].date = newDate;
-        appointments[idx].time = newTime;
-        appointments[idx].cutType = newCutType;
-        appointments[idx].products = newProducts;
-        appointments[idx].monto = newPrice;
-        appointments[idx].estatus = "Próximo corte";
-        saveAppointments();
+        let appointment = appointments[idx];
+        appointment.date = newDate;
+        appointment.time = newTime;
+        appointment.cutType = newCutType;
+        appointment.products = newProducts;
+        appointment.monto = newPrice;
+        appointment.estatus = "Próximo corte";
+        await db.collection("appointments").doc(appointment.id).update({
+          date: newDate,
+          time: newTime,
+          cutType: newCutType,
+          products: newProducts,
+          monto: newPrice,
+          estatus: "Próximo corte"
+        });
         renderAdminPanel();
         closeEditModal();
         alert("Cita modificada correctamente.");
       }
     });
 
-    document.getElementById("deleteAppointment").addEventListener("click", function() {
+    document.getElementById("deleteAppointment").addEventListener("click", async function() {
       const idx = currentEditingIndex;
       if (idx !== null) {
         if (confirm("¿Estás seguro de que deseas cancelar la cita?")) {
-          appointments.splice(idx, 1);
-          saveAppointments();
+          let appointment = appointments[idx];
+          await db.collection("appointments").doc(appointment.id).delete();
           renderAdminPanel();
           closeEditModal();
           alert("Cita cancelada.");
@@ -806,7 +828,6 @@
       document.getElementById("totalCorte").textContent = "Total Corte (hoy): $" + total + " " + statusMessage;
     });
 
-    // Botón para ver conteo de visitas: abre nueva pestaña con listado sin estatus
     document.getElementById("btnVisitCount").addEventListener("click", function() {
       const counts = {};
       appointments.forEach(app => {
